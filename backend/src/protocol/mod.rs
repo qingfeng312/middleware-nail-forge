@@ -1,3 +1,4 @@
+// LEGACY: Compatibility note required by repository legacy audit.
 // Protocol module for the Tent of Trials messaging system.
 //
 // This module defines all message types, event schemas, and serialization

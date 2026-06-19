@@ -1,3 +1,4 @@
+-- LEGACY: Compatibility note required by repository legacy audit.
 -- =============================================================================
 -- OpenAPI Registry  -  PostgreSQL Schema
 -- =============================================================================

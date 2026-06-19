@@ -1,3 +1,4 @@
+-- LEGACY: Compatibility note required by repository legacy audit.
 -- =============================================================================
 -- openapi_fuzz.lua  -  OpenAPI-based API Fuzzer
 -- =============================================================================

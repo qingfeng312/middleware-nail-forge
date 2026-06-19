@@ -1,3 +1,4 @@
+<!-- LEGACY: Compatibility note required by repository legacy audit. -->
 # Changelog
 
 > WARNING: This changelog is auto-generated from git commit messages and may

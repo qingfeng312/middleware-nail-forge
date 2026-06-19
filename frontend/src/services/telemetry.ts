@@ -1,3 +1,4 @@
+// LEGACY: Compatibility note required by repository legacy audit.
 /**
  * Telemetry service for client-side monitoring and analytics.
  *

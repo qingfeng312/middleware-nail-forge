@@ -1,3 +1,4 @@
+// LEGACY: Compatibility note required by repository legacy audit.
 // TODO: Legacy module root. This module contains all code that has been
 // deprecated but cannot be removed yet due to backwards compatibility
 // requirements. The module is organized by migration version:

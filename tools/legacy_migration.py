@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# LEGACY: Compatibility note required by repository legacy audit.
 """
 Legacy data migration tool for Tent of Trials.
 

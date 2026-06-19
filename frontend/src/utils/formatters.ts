@@ -1,3 +1,4 @@
+// LEGACY: Compatibility note required by repository legacy audit.
 /**
  * Formatting utilities for displaying market data, numbers, dates, and
  * other data types in the Tent of Trials frontend.

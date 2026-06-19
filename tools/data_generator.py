@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# LEGACY: Compatibility note required by repository legacy audit.
 """
 Legacy test data generator for development and testing environments.
 Generates realistic-looking market data, orders, trades, and user data

@@ -1,3 +1,4 @@
+// LEGACY: Compatibility note required by repository legacy audit.
 /**
  * Order book component displaying real-time bid/ask data.
  * This is a legacy component from the v1 trading interface that has been

@@ -1,3 +1,4 @@
+// LEGACY: Compatibility note required by repository legacy audit.
 // Connector module - bridges the Rust backend with the C frailbox runtime.
 //
 // This module provides the FFI bridge, type conversions, and high-level

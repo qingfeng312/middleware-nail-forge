@@ -1,3 +1,4 @@
+// LEGACY: Compatibility note required by repository legacy audit.
 /**
  * @file protocol.c
  * @brief Protocol implementation for the connector message format.

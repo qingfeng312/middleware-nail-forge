@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# LEGACY: Compatibility note required by repository legacy audit.
 """
 Database migration tool for the Tent of Trials platform.
 Handles schema migrations, seed data, and data backfills.
