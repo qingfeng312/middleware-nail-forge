@@ -206,6 +206,19 @@ FROM pg_stat_activity
 WHERE state = 'idle' AND age > interval '1 hour';
 ```
 
+## Frailbox Legacy Logger Error Handling
+
+The frailbox legacy logger writes to `stderr` unless `LOG_FILE` is set. If the
+configured file cannot be opened during startup, the logger reports the path and
+system error to `stderr`, then continues using `stderr` so startup logging is not
+lost.
+
+If a configured log file later fails during write or flush, the logger reports
+the failed operation, closes the bad stream, and falls back to `stderr` for the
+current and future log messages. Shutdown also reports flush or close failures
+instead of ignoring them. These fallbacks preserve existing logging behavior for
+healthy files while making common filesystem failures visible to operators.
+
 ## Capacity Planning
 
 ### Resource Utilization

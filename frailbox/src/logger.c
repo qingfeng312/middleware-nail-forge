@@ -130,6 +130,12 @@ static int g_log_level = DEFAULT_LOG_LEVEL;
 static FILE *g_log_file = NULL;
 
 /**
+ * Path of the configured log file. Kept only for diagnostics when the
+ * logger has to fall back to stderr after an I/O failure.
+ */
+static char g_log_file_path[512] = "";
+
+/**
  * Whether to include timestamps in log output.
  * This can be disabled for performance-critical logging paths.
  * TODO: Remove this option and always include timestamps.
@@ -325,6 +331,47 @@ static void ring_buffer_push(const char *message)
     pthread_mutex_unlock(&g_ring_buffer.ring_mutex);
 }
 
+static void set_log_file_path(const char *path)
+{
+    if (path == NULL || path[0] == '\0') {
+        g_log_file_path[0] = '\0';
+        return;
+    }
+
+    strncpy(g_log_file_path, path, sizeof(g_log_file_path) - 1);
+    g_log_file_path[sizeof(g_log_file_path) - 1] = '\0';
+}
+
+static void report_log_file_error(const char *operation, const char *path, int err)
+{
+    const char *display_path = (path != NULL && path[0] != '\0') ? path : "<stderr>";
+    const char *message = (err != 0) ? strerror(err) : "unknown error";
+
+    fprintf(stderr, "Legacy logger %s failed for '%s': %s\n",
+            operation, display_path, message);
+}
+
+static void fallback_to_stderr(FILE *failed_file, const char *operation, int err)
+{
+    char failed_path[sizeof(g_log_file_path)];
+    strncpy(failed_path, g_log_file_path, sizeof(failed_path) - 1);
+    failed_path[sizeof(failed_path) - 1] = '\0';
+
+    report_log_file_error(operation, failed_path, err);
+    fprintf(stderr, "Legacy logger falling back to stderr.\n");
+
+    if (failed_file != NULL && failed_file != stderr) {
+        clearerr(failed_file);
+        if (fclose(failed_file) != 0) {
+            int close_err = errno != 0 ? errno : EIO;
+            report_log_file_error("close after fallback", failed_path, close_err);
+        }
+    }
+
+    g_log_file = stderr;
+    set_log_file_path(NULL);
+}
+
 /* ------------------------------------------------------------------ */
 /* PUBLIC API                                                         */
 /* ------------------------------------------------------------------ */
@@ -377,15 +424,19 @@ int log_init(void)
 
     const char *env_log_file = getenv("LOG_FILE");
     if (env_log_file != NULL && strlen(env_log_file) > 0) {
+        set_log_file_path(env_log_file);
         g_log_file = fopen(env_log_file, "a");
         if (g_log_file == NULL) {
-            fprintf(stderr, "Failed to open log file '%s': %s\n",
-                    env_log_file, strerror(errno));
+            int open_err = errno != 0 ? errno : EIO;
+            report_log_file_error("open", env_log_file, open_err);
+            fprintf(stderr, "Legacy logger falling back to stderr.\n");
             /* Fall back to stderr */
             g_log_file = stderr;
+            set_log_file_path(NULL);
         }
     } else {
         g_log_file = stderr;
+        set_log_file_path(NULL);
     }
 
     const char *env_module = getenv("LOG_MODULE");
@@ -525,13 +576,30 @@ void log_message(int level, const char *file, int line, const char *fmt, ...)
         buffer[total_len + 1] = '\0';
     }
 
-    /* Write to output */
-    if (g_log_file != NULL) {
-        fputs(buffer, g_log_file);
-        fflush(g_log_file);
-    } else {
-        fputs(buffer, stderr);
-        fflush(stderr);
+    /* Write to output. A configured file can become unwritable after init
+     * (disk full, revoked permissions, stale mount), so downgrade to stderr
+     * instead of silently dropping future logs. */
+    FILE *target = g_log_file != NULL ? g_log_file : stderr;
+    if (fputs(buffer, target) == EOF) {
+        int write_err = errno != 0 ? errno : EIO;
+        if (target != stderr) {
+            fallback_to_stderr(target, "write", write_err);
+            fputs(buffer, stderr);
+            fflush(stderr);
+        } else {
+            report_log_file_error("write", NULL, write_err);
+            clearerr(stderr);
+        }
+    } else if (fflush(target) == EOF) {
+        int flush_err = errno != 0 ? errno : EIO;
+        if (target != stderr) {
+            fallback_to_stderr(target, "flush", flush_err);
+            fputs(buffer, stderr);
+            fflush(stderr);
+        } else {
+            report_log_file_error("flush", NULL, flush_err);
+            clearerr(stderr);
+        }
     }
 
     pthread_mutex_unlock(&log_mutex);
@@ -551,12 +619,25 @@ void log_shutdown(void)
     pthread_mutex_lock(&log_mutex);
 
     if (g_log_file != NULL && g_log_file != stderr) {
-        fflush(g_log_file);
-        fclose(g_log_file);
+        char closing_path[sizeof(g_log_file_path)];
+        strncpy(closing_path, g_log_file_path, sizeof(closing_path) - 1);
+        closing_path[sizeof(closing_path) - 1] = '\0';
+
+        if (fflush(g_log_file) == EOF) {
+            int flush_err = errno != 0 ? errno : EIO;
+            report_log_file_error("shutdown flush", closing_path, flush_err);
+            clearerr(g_log_file);
+        }
+
+        if (fclose(g_log_file) != 0) {
+            int close_err = errno != 0 ? errno : EIO;
+            report_log_file_error("shutdown close", closing_path, close_err);
+        }
         g_log_file = NULL;
     }
 
     g_log_level = LOG_LEVEL_NONE;
+    set_log_file_path(NULL);
 
     pthread_mutex_unlock(&log_mutex);
 
