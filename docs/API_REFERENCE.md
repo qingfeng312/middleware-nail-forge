@@ -64,6 +64,33 @@ Default rate limits:
 - Unauthenticated: 10 requests per second
 - WebSocket: 1000 messages per second per connection
 
+---
+
+## Service Health
+
+### GET /health
+
+Returns structured backend runtime health without exposing environment variables,
+secrets, or full process configuration.
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "commit": "abc1234",
+  "uptime_seconds": 123,
+  "features": [
+    "service_registry",
+    "service_discovery",
+    "message_broker",
+    "connector_bridge",
+    "build_profile:release"
+  ]
+}
+```
+
 ### Error Responses
 
 All API errors follow a standard format:

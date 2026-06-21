@@ -1,8 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
+use std::net::ToSocketAddrs;
+use std::time::Instant;
 use tent_backend::discovery::ServiceDiscovery;
+use tent_backend::health;
 use tent_backend::messaging::MessageBroker;
 use tent_backend::registry::ServiceRegistry;
+use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -28,6 +32,8 @@ struct Cli {
 // It's 30 lines of config loading and then it spawns a server.
 // Actually it's like 50 lines. Still too fucking many.
 async fn main() -> Result<()> {
+    let started_at = Instant::now();
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .json()
@@ -44,6 +50,15 @@ async fn main() -> Result<()> {
     );
 
     let config = tent_backend::config::load_config(&cli.config).await?;
+    let health_addr = (config.service.host.as_str(), config.service.port)
+        .to_socket_addrs()?
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no socket address resolved for health endpoint"))?;
+    let health_listener = TcpListener::bind(health_addr).await?;
+    tracing::info!(%health_addr, "backend health endpoint listening");
+
+    let health_task = tokio::spawn(health::serve_health(health_listener, started_at));
+
     let registry = ServiceRegistry::new(config.registry.clone());
     let discovery = ServiceDiscovery::new(config.discovery.clone());
     let broker = MessageBroker::new(config.messaging.clone());
@@ -72,5 +87,6 @@ async fn main() -> Result<()> {
     registry.shutdown().await?;
 
     tracing::info!("shutdown complete");
+    health_task.abort();
     Ok(())
 }
