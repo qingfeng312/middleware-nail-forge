@@ -380,9 +380,32 @@ Send an authentication message after connecting:
 {
   "type": "subscribe",
   "channel": "market.ticker",
-  "symbol": "BTC/USD"
+  "symbol": "BTC-USD"
 }
 ```
+
+Market symbols use `BASE-QUOTE` form such as `BTC-USD`. Clients may send
+slash-separated symbols such as `BTC/USD`; the server normalizes them before
+tracking the subscription.
+
+Invalid subscription messages receive a JSON error response instead of being
+silently ignored:
+
+```json
+{
+  "type": "error",
+  "code": "invalid_symbol",
+  "message": "symbol must use BASE-QUOTE format",
+  "details": {
+    "symbol": "BTCUSD",
+    "format": "BASE-QUOTE"
+  }
+}
+```
+
+Other subscription validation errors use the same shape with codes such as
+`invalid_json`, `unknown_message_type`, `missing_channel`, and
+`duplicate_subscription`.
 
 ### Available Channels
 

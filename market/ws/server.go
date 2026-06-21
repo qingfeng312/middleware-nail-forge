@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,13 +23,39 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
-	hub      *Hub
-	conn     *websocket.Conn
-	send     chan []byte
-	subs     map[types.Symbol]struct{}
-	remote   string
-	mu       sync.Mutex
+	hub    *Hub
+	conn   *websocket.Conn
+	send   chan []byte
+	subs   map[subscriptionKey]struct{}
+	remote string
+	mu     sync.Mutex
 }
+
+type subscriptionKey struct {
+	Channel string
+	Symbol  types.Symbol
+}
+
+type subscriptionMessage struct {
+	Type    string `json:"type"`
+	Channel string `json:"channel,omitempty"`
+	Symbol  string `json:"symbol,omitempty"`
+}
+
+type socketError struct {
+	Type    string            `json:"type"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Details map[string]string `json:"details,omitempty"`
+}
+
+type subscriptionAck struct {
+	Type    string       `json:"type"`
+	Channel string       `json:"channel"`
+	Symbol  types.Symbol `json:"symbol"`
+}
+
+var marketSymbolPattern = regexp.MustCompile(`^[A-Z0-9]{2,16}-[A-Z0-9]{2,16}$`)
 
 type Hub struct {
 	clients    map[*Client]struct{}
@@ -139,7 +167,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		hub:    s.hub,
 		conn:   conn,
 		send:   make(chan []byte, 256),
-		subs:   make(map[types.Symbol]struct{}),
+		subs:   make(map[subscriptionKey]struct{}),
 		remote: r.RemoteAddr,
 	}
 
@@ -188,14 +216,104 @@ func (c *Client) readPump() {
 			break
 		}
 
-		var event map[string]interface{}
-		if err := json.Unmarshal(message, &event); err != nil {
-			continue
-		}
+		c.handleInboundMessage(message)
+	}
+}
 
-		c.mu.Lock()
+func (c *Client) handleInboundMessage(message []byte) {
+	var event subscriptionMessage
+	if err := json.Unmarshal(message, &event); err != nil {
+		c.sendSocketError("invalid_json", "message must be valid JSON", nil)
+		return
+	}
 
+	switch event.Type {
+	case "subscribe":
+		c.handleSubscribe(event)
+	default:
+		c.sendSocketError("unknown_message_type", "unknown websocket message type", map[string]string{
+			"type": event.Type,
+		})
+	}
+}
+
+func (c *Client) handleSubscribe(event subscriptionMessage) {
+	channel := strings.TrimSpace(event.Channel)
+	if channel == "" {
+		c.sendSocketError("missing_channel", "subscription channel is required", nil)
+		return
+	}
+
+	symbol, err := normalizeMarketSymbol(event.Symbol)
+	if err != nil {
+		c.sendSocketError("invalid_symbol", err.Error(), map[string]string{
+			"symbol": event.Symbol,
+			"format": "BASE-QUOTE",
+		})
+		return
+	}
+
+	key := subscriptionKey{Channel: channel, Symbol: symbol}
+	c.mu.Lock()
+	if _, exists := c.subs[key]; exists {
 		c.mu.Unlock()
+		c.sendSocketError("duplicate_subscription", "subscription already exists for this connection", map[string]string{
+			"channel": channel,
+			"symbol":  string(symbol),
+		})
+		return
+	}
+	c.subs[key] = struct{}{}
+	c.mu.Unlock()
+
+	c.sendJSON(subscriptionAck{
+		Type:    "subscribed",
+		Channel: channel,
+		Symbol:  symbol,
+	})
+}
+
+func normalizeMarketSymbol(raw string) (types.Symbol, error) {
+	symbol := strings.ToUpper(strings.TrimSpace(raw))
+	symbol = strings.ReplaceAll(symbol, "/", "-")
+	if symbol == "" {
+		return "", fmt.Errorf("symbol is required")
+	}
+	if !marketSymbolPattern.MatchString(symbol) {
+		return "", fmt.Errorf("symbol must use BASE-QUOTE format")
+	}
+
+	parts := strings.Split(symbol, "-")
+	if len(parts) != 2 || parts[0] == parts[1] {
+		return "", fmt.Errorf("symbol must contain distinct base and quote assets")
+	}
+
+	return types.Symbol(symbol), nil
+}
+
+func (c *Client) sendSocketError(code, message string, details map[string]string) {
+	c.sendJSON(socketError{
+		Type:    "error",
+		Code:    code,
+		Message: message,
+		Details: details,
+	})
+}
+
+func (c *Client) sendJSON(v interface{}) {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+
+	select {
+	case c.send <- payload:
+	default:
+		if c.hub != nil && c.hub.logger != nil {
+			c.hub.logger.Warn("dropping websocket response for slow client",
+				zap.String("remote", c.remote),
+			)
+		}
 	}
 }
 
