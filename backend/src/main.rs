@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
 use tent_backend::discovery::ServiceDiscovery;
 use tent_backend::messaging::MessageBroker;
@@ -23,19 +23,65 @@ struct Cli {
     config: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LogFormat {
+    Text,
+    Json,
+}
+
+impl LogFormat {
+    fn from_env_value(value: Option<&str>) -> Result<Self> {
+        match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => Ok(Self::Text),
+            Some("text") => Ok(Self::Text),
+            Some("json") => Ok(Self::Json),
+            Some(value) => bail!(
+                "invalid TOT_LOG_FORMAT value '{value}'; expected 'text' or 'json'"
+            ),
+        }
+    }
+
+    fn from_env() -> Result<Self> {
+        let value = std::env::var("TOT_LOG_FORMAT").ok();
+        Self::from_env_value(value.as_deref())
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Json => "json",
+        }
+    }
+}
+
+fn env_filter() -> EnvFilter {
+    EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
+}
+
+fn init_tracing(log_format: LogFormat) {
+    match log_format {
+        LogFormat::Text => tracing_subscriber::fmt()
+            .with_env_filter(env_filter())
+            .init(),
+        LogFormat::Json => tracing_subscriber::fmt()
+            .with_env_filter(env_filter())
+            .json()
+            .init(),
+    }
+}
+
 #[tokio::main]
 // What the fuck is this main function even doing anymore.
 // It's 30 lines of config loading and then it spawns a server.
 // Actually it's like 50 lines. Still too fucking many.
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .json()
-        .init();
+    let log_format = LogFormat::from_env()?;
+    init_tracing(log_format);
 
     let cli = Cli::parse();
 
     tracing::info!(
+        log_format = log_format.as_str(),
         node_id = %cli.node_id,
         consensus = %cli.consensus,
         max_connections = %cli.max_connections,
@@ -73,4 +119,35 @@ async fn main() -> Result<()> {
 
     tracing::info!("shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogFormat;
+
+    #[test]
+    fn default_log_format_is_text() {
+        assert_eq!(LogFormat::from_env_value(None).unwrap(), LogFormat::Text);
+        assert_eq!(LogFormat::from_env_value(Some("")).unwrap(), LogFormat::Text);
+        assert_eq!(LogFormat::from_env_value(Some("   ")).unwrap(), LogFormat::Text);
+    }
+
+    #[test]
+    fn accepts_supported_log_formats() {
+        assert_eq!(LogFormat::from_env_value(Some("text")).unwrap(), LogFormat::Text);
+        assert_eq!(LogFormat::from_env_value(Some("json")).unwrap(), LogFormat::Json);
+        assert_eq!(LogFormat::Text.as_str(), "text");
+        assert_eq!(LogFormat::Json.as_str(), "json");
+    }
+
+    #[test]
+    fn rejects_invalid_log_format_values() {
+        let error = LogFormat::from_env_value(Some("xml")).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("invalid TOT_LOG_FORMAT value 'xml'")
+        );
+    }
 }

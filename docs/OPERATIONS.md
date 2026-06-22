@@ -15,6 +15,17 @@
 
 ## Monitoring
 
+### Backend Startup Log Format
+
+The backend startup log includes a non-secret `log_format` field so operators
+can confirm which tracing formatter is active. Set `TOT_LOG_FORMAT=text` or
+`TOT_LOG_FORMAT=json` before starting `tent-backend`; unset or empty values
+default to `text`.
+
+Invalid `TOT_LOG_FORMAT` values fail startup before the tracing subscriber is
+initialized. Only the normalized `text` or `json` value is emitted in startup
+logs, not the raw environment variable contents.
+
 ### Health Check Endpoints
 
 Each service exposes a health check endpoint:
